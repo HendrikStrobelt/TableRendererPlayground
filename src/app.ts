@@ -1,8 +1,7 @@
-/// <reference path='references.d.ts' />
 
 import d3 = require('d3');
 import $ = require('jquery');
-import table = require('table');
+import table = require('./table');
 
 $("#go").click(function () {
     var text = $("#text").val();
@@ -13,6 +12,6 @@ $("#go").click(function () {
 
 var tangeloProvider = new table.TangeloProvider("server/tableProvider", "music");
 var generatorProvider = new table.GeneratorProvider(10, 100000);
-var testTable = new table.Element("testTable");
+var testTable = new table.Element("testTable", generatorProvider);
 
 console.log("test");

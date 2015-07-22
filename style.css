@@ -1,4 +1,11 @@
 .testTable {
-    width:  500px,
-    height: 600px
+    width:  500px;
+    height: 600px;
+    background: red;
+    overflow: auto;
+}
+
+.internalPane {
+    position: relative;
+    background: blue;
 }
