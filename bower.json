@@ -1,16 +1,7 @@
 {
-  "name": "TableRendererPlayground",
-  "version": "0.1.0",
-  "homepage": "https://github.com/HendrikStrobelt/TableRendererPlayground",
-  "authors": [
-    "Hendrik Strobelt <hendrik@strobelt.com>",
-    "Samuel Gratzl <samuel.gratzl@jku.at>"
-  ],
-  "description": "Fast SVG Table Renderer",
-  "main": "svg-table-renderer.js",
-  "moduleType": [
-    "amd"
-  ],
+  "name": "SVGTable",
+  "version": "0.0.0",
+  "main": "bower_components/requirejs/require.js",
   "license": "MIT",
   "ignore": [
     "**/.*",
@@ -20,7 +11,9 @@
     "tests"
   ],
   "dependencies": {
-    "d3": "~3",
-    "jQuery": "~2.1"
+    "jquery": "~2.1.4",
+    "d3": "~3.5.6",
+    "requirejs": "~2.1.19",
+    "underscore": "~1.8.3"
   }
 }
