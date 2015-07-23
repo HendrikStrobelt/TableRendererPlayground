@@ -2,6 +2,7 @@
 
 import $ = require('jquery');
 import _ = require('underscore');
+import d3 = require('d3');
 
 // DOM manager.
 export class Element {
@@ -19,7 +20,7 @@ export class Element {
 
     constructor(public domId: string,
                 public dataProvider: DataProvider,
-                public cellGenerator: CellGenerator,
+                public cellGenerator: CellGenerator = labelCellGenerator,
                 public elementStyle: ElementStyle = new ElementStyle()) {
         this.div = <HTMLDivElement> $('#' + domId)[0];
         this.svg = <SVGElement> document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -47,9 +48,15 @@ export class Element {
         this.rowSliceSize = this.visibleRowCount;
         this.sliceBuffer = [];   // Clear full cache, for now
         this.sliceIndex = [];
+
+        this.cellsUpdate();
     }
 
     private cellsUpdate() {
+        this.visibleBlockIndices(2).forEach((i) => this.fetchSlice(i));
+    }
+
+    private visibleBlockIndices(neighborhood: number = 1) {
         var bounds = this.svg.getBoundingClientRect();
 
         // Visible row coordinates.
@@ -59,8 +66,7 @@ export class Element {
         var middleBlockIndex = this.rowToBlockIndex(middleRowIndex);
 
         // Fetch neighbor blocks, for now.
-        var fetchBlockIndices = _.range(-1, 2).map(dI => middleBlockIndex + dI).filter(i => i >= 0);
-        fetchBlockIndices.forEach((i) => this.fetchSlice(i));
+        return _.range(-neighborhood, neighborhood + 1).map(dI => middleBlockIndex + dI).filter(i => i >= 0);
     }
 
     private rowToBlockIndex(rowIndex: number) {
@@ -85,12 +91,52 @@ export class Element {
                 // Update slice index.
                 this.sliceIndex[this.rowToBlockIndex(slice.query.beginRow)] = slice;
 
+                // Update SVG for newly received block.
+                this.updateSVG();
+
                 //console.log("Buffer by index: " + this.sliceBuffer.map(s => s.query.beginRow + " to " + s.query.endRow));
                 //console.log("Slices by index: " + _.keys(this.sliceIndex));
             });
         }
 
         return result;
+    }
+
+    private updateSVG() {
+        $(this.svg).empty();
+
+        var slices: Slice[] = _.compact(this.visibleBlockIndices().map(i => this.sliceIndex[i]));
+        var colCount = slices.length == 0 ? 0 : slices[0].query.columns.length;
+        var rowCount = 0;
+        slices.forEach(s => rowCount += s.rowIds.length);
+
+        // Fill cell range from blocks.
+        var cells: string[][] = [];
+        for(var i = 0; i < colCount; i++) cells[i] = [];
+
+        var cD = this.elementStyle.cellDimensions;
+        slices.forEach(s => {
+            s.columns.forEach((c, cI) => {
+
+                c.values.forEach((v, rI) => {
+                    var aRI = s.query.beginRow + rI;
+
+                    var cellSVG = this.cellGenerator(
+                        s.rowIds[rI],
+                        c.column.name,
+                        v,
+                        aRI * cD.height,
+                        (cI+1) * cD.width,
+                        (aRI+1) * cD.height,
+                        cI * cD.width);
+                    this.insertSVGElement(cellSVG);
+                });
+            });
+        });
+    }
+
+    private insertSVGElement(svgEl: SVGElement) {
+        this.svg.appendChild(svgEl);
     }
 
 }
@@ -101,11 +147,32 @@ export class ElementStyle {
 }
 
 export interface CellGenerator {
-    (rowId: string, value: any, top: number, right: number, bottom: number, left: number): SVGElement;
+    (rowId: string,
+     columnId: string,
+     value: any,
+     top: number,
+     right: number,
+     bottom: number,
+     left: number): SVGElement;
 }
 
-export function labelCellGenerator(value: any, top: number, right: number, bottom: number, left: number) {
+export function labelCellGenerator(rowId: string,
+                                   columnId: string,
+                                   value: any,
+                                   top: number,
+                                   right: number,
+                                   bottom: number,
+                                   left: number) {
+    var label = document.createElementNS("http://www.w3.org/2000/svg", "text");
 
+    label.setAttributeNS(null, "x", left + "px");
+    label.setAttributeNS(null, "y", top + "px");
+    label.setAttributeNS(null, "font-size", "16");
+
+    var textNode = document.createTextNode(value);
+    label.appendChild(textNode);
+
+    return <SVGElement> label;
 }
 
 // Base table configuration, sent by server.
@@ -154,8 +221,6 @@ export class TangeloProvider implements DataProvider {
         reqStr += "tableName=" + encodeURIComponent(this.serverTable);
         for(var i = 0; i < args.length; i++)
             reqStr += args[i] + "=" + encodeURIComponent(args[i+1]) + (i < args.length - 1 ? "&" : "");
-
-        console.log("Sent request: " + reqStr);
 
         return Promise.resolve($.getJSON(reqStr));
     }
