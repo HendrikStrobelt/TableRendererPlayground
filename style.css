@@ -1,15 +1,39 @@
-.testTable {
+@import url(https://fonts.googleapis.com/css?family=Open+Sans);
+
+/* Reset */
+* {
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+
+html, body {
+    background-color: hsl(60, 2%, 96%);
+    font-family: 'Open Sans', sans-serif;
+    font-size: 14px;
+}
+
+#exampleTable {
     position: absolute;
-    width:  500px;
-    margin-left: auto;
+    width: 800px;
+    left: 50%;
+    margin-left: -400px;
     margin-right: auto;
     top: 10px;
     bottom: 10px;
-    background: red;
     overflow: auto;
+    outline: hsl(60, 0%, 90%) solid 1px;
 }
 
-.internalPane {
-    position: relative;
-    background: rgb(235, 235, 235);
+#exampleTable > .internalPane {
+    background-color: hsl(60, 2%, 99%);
+}
+
+text {
+    transform: translate(5px, 4px);
+    alignment-baseline: hanging;
+}
+
+line {
+    stroke: hsl(60, 0%, 90%);
 }

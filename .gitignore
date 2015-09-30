@@ -1,2 +1,2 @@
-bower_components
 *.map
+server/misong.sqlite

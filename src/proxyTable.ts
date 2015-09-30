@@ -1,211 +1,231 @@
-///<reference path="references.d.ts"/>
+/// <reference path="definitions/jquery.d.ts" />
+/// <reference path="definitions/d3.d.ts" />
+/// <reference path="definitions/es6-promise.d.ts" />
+/// <reference path="definitions/underscore.d.ts" />
 
-class ProxyTable {
-    private div: HTMLDivElement;
-    private svg: SVGElement;
+module ProxyTable {
 
-    private visibleRowCount: number;        // Number of rows visible in viewport.
-    private rowSliceSize: number;           // Number of rows to put in a slice.
-    private sliceBuffer: Slice[];           // Slices, by added order.
-    private bufferedRange: number = 5;
-    private sliceIndex: Slice[];            // Slices, by block normalized index.
-    private sliceFetchIndex: boolean[];     // Slices, flagged to be fetched.
+    export class Table {
+        public dom: HTMLDivElement;
+        private svg: SVGElement;
 
-    private columns: Identifiable[];        // Last known column configuration.
-    private rowCount: number;               // Last known total number of table rows.
+        private sliceIndex: Slice[];                        // Slices, by block normalized index.
+        private toFetch: number[];                          // Slices to fetch, as block normalized indices.
+        private lastRowCount: number;
+        private lastColumns: Identifiable[];
+        private lastRowDimensions: Dimensions;              // Total table dimensions.
 
-    private refreshDelay = 50;
+        constructor(public domElement: string | HTMLDivElement,
+                    public dataProvider: DataProvider,      // Provides table data by row interval.
+                    public layoutProvider: LayoutProvider,
+                    public bufferedBlocks = 10,             // Number (radius) of row blocks to load around viewport center.
+                    public rowBlockSize = 100) {            // Number of rows in a single block.
+            // Accept a DOM element or an identifier.
+            this.dom = typeof domElement === "string" ? <HTMLDivElement> $('#' + domElement)[0] : domElement;
 
-    private dataProvider: DataProvider;
+            this.svg = <SVGElement> document.createElementNS("http://www.w3.org/2000/svg", "svg");
+            this.svg.setAttribute("class", "internalPane");
+            this.dom.appendChild(this.svg);
 
-    constructor(public domId: string,
-                public paneGenerator: PaneGenerator,
-                public elementStyle: ElementStyle,
-                dataProvider?: DataProvider) {
-        this.div = <HTMLDivElement> $('#' + domId)[0];
-        this.svg = <SVGElement> document.createElementNS("http://www.w3.org/2000/svg", "svg");
-        this.svg.setAttribute("class", "internalPane");
-        this.svg.setAttribute("id", "internalPane");
-        this.div.appendChild(this.svg);
+            this.lastRowCount = 0;
+            this.lastColumns = [];
+            this.lastRowDimensions = { width: 1, height: 1 };
 
-        if(dataProvider) {
             this.setDataProvider(dataProvider);
-        }
 
-        // Update SVG pane to match total table size. TODO: push server-side table changes.
-        //dataProvider.requestConfiguration().then((c) => this.updatePane(c));
-        this.updatePane();
-
-        // Update table cells on SVG scroll.
-        $(this.div).scroll($['debounce'](this.refreshDelay, () => this.cellsUpdate()));
-    }
-
-    public setDataProvider(dataProvider: DataProvider) {
-        this.dataProvider = dataProvider;
-    }
-
-    private updatePane() {
-        // Update visibility values.
-        this.visibleRowCount = Math.ceil(this.div.offsetHeight / this.elementStyle.height);
-        this.rowSliceSize = this.visibleRowCount;
-        this.sliceBuffer = [];
-        this.sliceIndex = [];
-        this.sliceFetchIndex = [];
-
-        this.cellsUpdate();
-    }
-
-    private cellsUpdate() {
-        this.visibleBlockIndices(this.bufferedRange).forEach((i) => this.fetchSlice(i));
-    }
-
-    private visibleBlockIndices(neighborhood: number = 1) {
-        var blockRange = this.visibleBlockRange(neighborhood);
-
-        // Build range from middle index outwards (middle will be requested first).
-        var middleIndex = Math.floor((blockRange[0] + blockRange[1]) / 2);
-        var result = [middleIndex];
-        for(var i = 1; i <= neighborhood; i++) {
-            result.push(middleIndex + i);
-            result.push(middleIndex - i);
-        }
-
-        return result;
-    }
-
-    private visibleBlockRange(neighborhood: number = 1) {
-        var bounds = this.svg.getBoundingClientRect();
-
-        // Visible row coordinates.
-        var middleRowIndex = Math.round(
-            -bounds.top / this.elementStyle.height + this.visibleRowCount / 2);
-        var middleBlockIndex = this.rowToBlockIndex(middleRowIndex);
-
-        return [Math.max(0, middleBlockIndex - neighborhood), middleBlockIndex + neighborhood + 1];
-    }
-
-    private rowToBlockIndex(rowIndex: number) {
-        return Math.floor(rowIndex / this.rowSliceSize);
-    }
-
-    private fetchSlice(index: number) {
-        // Fetch when slice is missing and not requested yet.
-        if(!this.sliceIndex[index] && !this.sliceFetchIndex[index]) {
-            // Flag request.
-            this.sliceFetchIndex[index] = true;
-
-            // Request relevant row range.
-            this.dataProvider(index * this.rowSliceSize, (index + 1) * this.rowSliceSize)
-                .then((slice: Slice) => {
-                    // Unflag request.
-                    this.sliceFetchIndex[index] = null;
-                    this.sliceFetchIndex = _.pick(this.sliceFetchIndex, _.identity);
-
-                    // Store slice.
-                    this.sliceIndex[index] = slice;
-                    this.sliceBuffer.push(slice);
-
-                    // Update column configuration and table row total, match div size of internal pane.
-                    if(slice.columns) {
-                        this.columns = slice.columns;
-                        this.svg.setAttribute("width", (this.columns.length * this.elementStyle.width).toString());
-                    }
-                    if(slice.tableRowCount) {
-                        this.rowCount = slice.tableRowCount;
-                        this.svg.setAttribute("height", (this.rowCount * this.elementStyle.height).toString());
-                    }
-
-                    // Update SVG for newly received block.
-                    this.updateSVG();
-                });
-        }
-        // Immediate SVG update.
-        else {
-            this.updateSVG();
-        }
-    }
-
-    private updateSVG = $['throttle'](this.refreshDelay, () => {
-        // Clear slice buffer.
-        var bufferRange = this.visibleBlockRange(this.bufferedRange);
-        var inRange = (index: number) => bufferRange[0] <= index && index <= bufferRange[1];
-
-        this.sliceBuffer = this.sliceBuffer.filter(s => inRange(this.rowToBlockIndex(s.beginRow)));
-        this.sliceIndex = _.pick(this.sliceIndex, (s, i) => bufferRange[0] <= i && i <= bufferRange[1]);
-
-        var slices: Slice[] = _.compact(this.visibleBlockIndices().map(i => this.sliceIndex[i]));
-        var colCount = slices.length == 0 ? 0 : slices[0].columns.length;
-
-        var cells: CellInfo[][] = [];
-        var flat: CellInfo[] = [];
-        for(var i = 0; i < colCount; i++) cells[i] = [];
-
-        var eS = this.elementStyle;
-        slices.forEach(s => {
-            s.values.forEach((r, rI) => {
-                r.forEach((v, cI) => {
-                    var absI = s.beginRow + rI;
-
-                    cells[cI][absI] = new CellInfo(
-                        s.rows[rI].id,
-                        s.columns[cI].id,
-                        v,
-                        absI * eS.height,
-                        (cI+1) * eS.width,
-                        (absI+1) * eS.height,
-                        cI * eS.width
-                    );
-
-                    flat.push(cells[cI][absI]);
-                });
+            // Update table cells on SVG scroll.
+            $(this.dom).scroll(() => {
+                this.requestUpdateView();
+                this.updateCells();
             });
-        });
+        }
 
-        this.paneGenerator(this.svg, cells, _.compact(flat));
-    });
+        // Set data provider and update table view, or just update table view (without parameter).
+        public setDataProvider(dataProvider: DataProvider = null) {
+            if(dataProvider) {
+                this.dataProvider = dataProvider;
+            }
 
-}
+            // Clear slice records.
+            this.sliceIndex = [];
+            this.toFetch = [];
 
-interface ElementStyle {
-    width: number;
-    height: number;
-}
+            // Request new records.
+            this.updateCells();
+        }
 
-class CellInfo {
-    centerX: number;
-    centerY: number;
+        private updateCells() {
+            this.toFetch = this.visibleBlockIndices(this.bufferedBlocks).filter(bI => !this.sliceIndex[bI]);
+            this.fetchSlices();
+        }
 
-    constructor(public rowId: string,
-                public columnId: string,
-                public value: any,
-                public top: number,
-                public right: number,
-                public bottom: number,
-                public left: number) {
-        this.centerX = (left + right) / 2;
-        this.centerY = (top + bottom) / 2;
+        private visibleBlockIndices(neighborhood: number = 1) {
+            // Build range from middle index outwards (middle will be requested first).
+            var visibleIndex = this.visibleBlock();
+            var result = [visibleIndex];
+            for(var i = 1; i <= neighborhood; i++) {
+                result.push(visibleIndex + i);
+                if(visibleIndex > 0) result.push(visibleIndex - i);
+            }
+
+            return result;
+        }
+
+        private visibleBlock() {
+            var bounds = this.svg.getBoundingClientRect();
+
+            // Visible row coordinates.
+            var visibleRowCount = Math.ceil(this.dom.offsetHeight / this.lastRowDimensions.height);
+            var middleRowIndex = Math.round(-bounds.top / this.lastRowDimensions.height + visibleRowCount / 2);
+            var middleBlockIndex = Math.floor(middleRowIndex / this.rowBlockSize);
+
+            return middleBlockIndex;
+        }
+
+        // Fetch slices one by one to moderate load for client and server.
+        // This also prevents having to use throttling/debouncing.
+        // The most important slice will be fetched first anyways.
+        private fetchingSlice = false;
+        private fetchSlices() {
+            if(!this.fetchingSlice && this.toFetch.length > 0) {
+                this.fetchingSlice = true;
+                var fetchI = this.toFetch.shift();
+
+                // Request relevant row range.
+                var beginRow = fetchI * this.rowBlockSize;
+                var endRow = (fetchI + 1) * this.rowBlockSize;
+                this.dataProvider(beginRow, endRow)
+                    .then((slice: Slice) => {
+                        // Store slice.
+                        slice.beginRow = beginRow;
+                        this.sliceIndex[fetchI] = slice;
+
+                        // New table dimensions have been posted.
+                        if(slice.columns) {
+                            this.lastColumns = slice.columns;   // Includes additional column fields from dataProvider.
+                        }
+                        if(slice.tableRowCount) {
+                            this.lastRowCount = slice.tableRowCount;
+                            this.updateTableDimensions();
+                        }
+
+                        // Update SVG for newly received block.
+                        this.requestUpdateView(fetchI);
+
+                        // Fetch next slice (if any).
+                        this.fetchingSlice = false;
+                        this.fetchSlices();
+                    });
+            }
+        }
+
+        // Update column configuration and table row total, match div size of internal pane.
+        private updateTableDimensions() {
+            this.svg.setAttribute("width", this.lastRowDimensions.width.toString());
+            this.svg.setAttribute("height", (this.lastRowCount * this.lastRowDimensions.height).toString());
+        }
+
+        // Request the
+        private lastUpdateIndex = null;
+        private requestUpdateView(changedSliceIndex: number = -1) {
+            var updateView = false;
+
+            if(changedSliceIndex >= 0) {
+                updateView = Math.abs(changedSliceIndex - this.visibleBlock()) <= 1;
+            } else {
+                var visibleIndex = this.visibleBlock();
+                updateView = visibleIndex !== this.lastUpdateIndex;
+                this.lastUpdateIndex = visibleIndex;
+            }
+
+            if(updateView) {
+                this.updateView();
+            }
+        }
+
+        // Push table data to the layoutProvider.
+        private updateView() {
+            // Compose the visible section from the three slices that (possibly) intersect the viewport.
+            var slices: Slice[] = _.compact(this.visibleBlockIndices().map(i => this.sliceIndex[i]));
+
+            // Provide table data in three formats: all cells, column->row->cell, row->column->cell.
+            var columns = this.lastColumns.map((c, i) => new Line(c.id, [], i));
+            var rows: Line[] = [];
+            var cells: Cell[] = [];
+
+            // Prevent redundant update when no slices are available.
+            if(slices.length) {
+                // Clean slice index.
+                var middleBlockIndex = this.visibleBlock();
+                this.sliceIndex = _.pick(this.sliceIndex,
+                    (s, i) => Math.max(0, middleBlockIndex - 1) <= i && i <= middleBlockIndex + 1);
+
+                // Compose columns, rows, and cells from slices.
+                slices.forEach(s => {
+                    for(var rI = 0; rI < this.rowBlockSize; rI++) {
+                        var r = s.rows[rI]; // TODO: copy any additional row fields that dataProvider has provided.
+                        var outRow = new Line(r.id, [], s.beginRow + rI);
+                        rows.push(outRow);
+
+                        s.values[rI].forEach((v, cI) => {
+                            var cell = new Cell(columns[cI], outRow, v);
+                            columns[cI].cells.push(cell);
+                            outRow.cells.push(cell);
+                            cells.push(cell);
+                        });
+                    }
+                });
+
+                var updRowDimensions = this.layoutProvider(this.svg, columns, rows, cells);
+
+                // Update internal pane size if the reported (average) element size has changed.
+                var rowWidth = updRowDimensions.width;
+                var avgRowHeight = Math.ceil(updRowDimensions.height / rows.length);
+                if(rowWidth && avgRowHeight) {
+                    this.lastRowDimensions = { width: rowWidth, height: avgRowHeight };
+                    this.updateTableDimensions();
+                }
+            }
+        }
     }
-}
 
-interface PaneGenerator {
-    (svgRoot: SVGElement, table: CellInfo[][], flat: CellInfo[]);
-}
+    // Query result, received from a data provider.
+    interface Slice {
+        beginRow: number;           // Index of first row in total table.
+        rows: Identifiable[];       // Row information with unique identifier.
+        columns: Identifiable[];    // Column information with unique identifier.
+        values: any[][];            // Indexed [row][column]
+        tableRowCount?: number;     // Optional total row count update.
+    }
 
-// Object with unique identifier (for example, a row or column).
-interface Identifiable {
-    id: string;
-}
+    // Table/Cell dimensions.
+    export interface Dimensions {
+        width: number;
+        height: number;
+    }
 
-// Data provider function
-interface DataProvider {
-    (beginRow: number, endRow: number): Promise<Slice>;
-}
+    // Object with unique identifier (for example, a row or column).
+    interface Identifiable {
+        id: string;
+    }
 
-// Query result, sent by a data provider.
-interface Slice {
-    beginRow: number;           // index of first row in total table.
-    rows: Identifiable[];       // row information with unique identifier.
-    columns: Identifiable[];    // column information with unique identifier.
-    values: any[][];            // indexed [row][column]
-    tableRowCount?: number;     // optional total row count update.
+    // Filled column or row.
+    export class Line implements Identifiable {
+        constructor(public id: string, public cells: Cell[], public index: number) {}
+    }
+
+    export class Cell {
+        constructor(public column: Line, public row: Line, public value: any) { }
+    }
+
+    // Function to handle the data acquisition of a table interval, for row indices [beginRow, endRow].
+    export interface DataProvider {
+        (beginRow: number, endRow: number): Promise<Slice>;
+    }
+
+    // Function to handle the rendering of a table interval.
+    export interface LayoutProvider {
+        (svgRoot: SVGElement, columns: Line[], rows: Line[], cells: Cell[]): Dimensions;
+    }
+
 }

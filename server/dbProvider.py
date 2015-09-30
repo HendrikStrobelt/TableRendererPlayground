@@ -35,7 +35,6 @@ def run(query):
     conn.close()
 
     return {
-        'beginRow': beginRow,
         'rows': outRows,
         'columns': outColumns,
         'values': outValues,
