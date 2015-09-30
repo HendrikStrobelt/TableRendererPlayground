@@ -781,7 +781,7 @@ interface JQueryStatic {
     /**
      * Creates DOM elements on the fly from the provided string of raw HTML.
      *
-     * @param html A string defining a single, standalone, HTML element (e.g. <div/> or <div></div>).
+     * @param html A string defining a single, standalone, HTML element (e.g. <domElement/> or <domElement></domElement>).
      * @param attributes An object of attributes, events, and methods to call on the newly-created element.
      */
     (html: string, attributes: Object): JQuery;
